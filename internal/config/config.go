@@ -156,7 +156,7 @@ func LoadInstruments(path string) (Instruments, error) {
 }
 
 // WriteInstruments writes a list of instruments in the same YAML shape that
-// LoadInstruments reads. Used by the classifier to emit a suggestions file.
+// LoadInstruments reads. Used by the classifier to emit a file.
 func WriteInstruments(path string, list []model.Instrument, notes map[string]string) error {
 	f := instrumentsFile{}
 	for _, in := range list {

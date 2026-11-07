@@ -1,103 +1,146 @@
-// Package classify guesses the tax regime of an instrument from its ISIN and
-// name.
+// Package classify decides which Irish tax regime an instrument falls under.
+//
+// Decision chain:
+//
+//  1. CFI code (ISO 10962), from a register such as ESMA FIRDS.
+//     E… equity (shares, ADRs, investment trusts)         → CGT
+//     D… debt (ETCs, ETNs, leveraged/inverse "ETPs")      → CGT
+//     C… collective investment vehicle                    → see fundRegime
+//  2. Issuer kind, from a register such as GLEIF, when no CFI is known.
+//     company → CGT; fund → see fundRegime.
+//  3. Words in the instrument name, not confident.
+//
+// fundRegime: a fund domiciled in the EU/EEA is almost always a UCITS and
+// therefore an "equivalent" offshore fund taxed under exit tax. A fund
+// domiciled in another OECD treaty state (e.g. US), is exit-tax-eligible only
+// if it is "similar in all material respects" to an Irish regulated fund.
+// This package considers all founs as exit tax by default.
 package classify
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/ichenhe/cgt-ie/internal/model"
 )
 
-// Suggestion is a guessed classification with the reason.
-type Suggestion struct {
+// Classification is a guessed classification with the reason.
+type Classification struct {
 	Instrument model.Instrument
 	Reason     string
 	Confident  bool
+	// Source names the evidence used: "cfi", "issuer", "name" or "user".
+	Source string
 }
 
 // Fund-issuer / fund-type words that strongly indicate a collective
-// investment vehicle.
+// investment vehicle. Used only when no register has the instrument.
 var fundWords = []string{
 	"ucits", "etf", "ishares", "vanguard", "xtrackers", "x-trackers", "spdr",
 	"invesco", "amundi", "lyxor", "hsbc msci", "hsbc ftse", "hsbc s&p",
 	"ubs etf", "wisdomtree", "vaneck", "global x", "l&g", "legal & general", "jpm ",
 	"jpmorgan etf", "fidelity ucits", "franklin ftse", "franklin libertyshares",
-	// Share-class markers used by Trading 212 for funds, e.g. "iShares S&P 500 Swap (Acc)"
 	"(acc)", "(dist)", "(acc.)", "(dis)", " acc ", " dist ",
 }
 
 // Words that indicate a debt-structured product (ETC/ETN) or a leveraged /
-// inverse product. These are not funds for s.747 purposes and fall under CGT.
+// inverse product. Debt securities, not funds: CGT.
 var etcWords = []string{
 	"etc", "etn", "leveraged", "3x", "2x", "-3x", "-2x", "short ", "daily short",
 	"physical gold", "physical silver", "physical platinum", "physical palladium",
 	"brent", "wti", "crude oil", "natural gas", "bitcoin", "ethereum", "crypto",
 }
 
-// EU/EEA/OECD ISIN prefixes commonly used for UCITS funds. Jersey (JE) and
-// Guernsey (GG) are deliberately absent: they are outside the EU/EEA/OECD, so
-// a fund domiciled there falls under Part 27 Chapter 2 (s.747A), which this
-// tool does not model.
-var fundDomiciles = map[string]bool{
-	"IE": true, "LU": true, "DE": true, "FR": true, "NL": true, "CH": true,
-	"GB": true, "LI": true, "AT": true, "BE": true,
-	"DK": true, "FI": true, "SE": true, "NO": true, "IT": true, "ES": true,
+// eea lists ISIN prefixes of EU/EEA states. A fund domiciled here is
+// presumed UCITS-equivalent.
+var eea = map[string]struct{}{
+	"AT": {}, "BE": {}, "BG": {}, "HR": {}, "CY": {}, "CZ": {}, "DK": {},
+	"EE": {}, "FI": {}, "FR": {}, "DE": {}, "GR": {}, "HU": {}, "IE": {},
+	"IT": {}, "LV": {}, "LT": {}, "LU": {}, "MT": {}, "NL": {}, "PL": {},
+	"PT": {}, "RO": {}, "SK": {}, "SI": {}, "ES": {}, "SE": {}, "IS": {},
+	"LI": {}, "NO": {},
 }
 
-// Guess returns a suggestion for one instrument. key is Trade.Key(); isin
-// may be empty for brokers that do not export it.
-func Guess(key, isin, ticker, name string) Suggestion {
-	prefix := strings.ToUpper(isin)
-	if len(prefix) >= 2 {
-		prefix = prefix[:2]
-	} else {
-		prefix = "??"
-	}
-	n := " " + strings.ToLower(name) + " "
-
+// Classify decides the regime for one instrument from whatever is known
+// about it (info may be the zero value).
+func Classify(key, isin, ticker, name string, info Info) Classification {
 	ins := model.Instrument{Key: key, ISIN: isin, Ticker: ticker, Name: name}
+	prefix := ""
+	if len(isin) >= 2 {
+		prefix = strings.ToUpper(isin[:2])
+	}
+	// 1. CFI code.
+	if info.CFI != "" {
+		switch info.CFI[0] {
+		case 'E':
+			return Classification{withRegime(ins, model.RegimeCGT), "CFI " + info.CFI + ": equity → CGT", true, "cfi"}
+		case 'D':
+			return Classification{withRegime(ins, model.RegimeCGT), "CFI " + info.CFI + ": debt instrument, not a fund → CGT", true, "cfi"}
+		case 'C':
+			return fundRegime(ins, prefix, "CFI "+info.CFI+": collective investment vehicle", "cfi")
+		default:
+			return Classification{withRegime(ins, model.RegimeCGT), "CFI " + info.CFI + ": unexpected class; CHECK", false, "cfi"}
+		}
+	}
 
+	// 2. Issuer kind.
+	switch info.Issuer {
+	case IssuerFund:
+		return fundRegime(ins, prefix, "issuer "+info.IssuerName+" is a fund", "issuer")
+	case IssuerCompany:
+		return Classification{withRegime(ins, model.RegimeCGT), "issuer " + info.IssuerName + " is a company, not a fund → CGT", true, "issuer"}
+	}
+
+	// 3. Infer from the name, not confident.
+	n := " " + strings.ToLower(name) + " "
 	hasFund := containsAny(n, fundWords)
 	hasETC := containsAny(n, etcWords)
-
 	switch {
 	case hasETC:
-		ins.Regime = model.RegimeCGT
-		return Suggestion{ins, "name suggests ETC/ETN or leveraged product (debt security, not a fund) → CGT", hasFund}
-	case hasFund && prefix == "US":
-		// Since 1 January 2022 Revenue no longer confirms that US ETFs are
-		// taxed like shares (TDM Part 27-01A-03). The USA is an OECD state,
-		// so a US fund that is "similar in all material respects" to an
-		// Irish fund is an equivalent offshore fund under s.747B(2A) and
-		// exit tax applies. Default to the more conservative regime.
-		ins.Regime = model.RegimeExitTax
-		return Suggestion{ins, "US-domiciled fund → exit tax by default; since 1 Jan 2022 Revenue no longer treats US ETFs as shares (TDM 27-01A-03). CHECK s.747B equivalence; 8-year clock for pre-2022 holdings starts in 2022", false}
-	case hasFund && fundDomiciles[prefix]:
-		ins.Regime = model.RegimeExitTax
-		return Suggestion{ins, "name indicates UCITS fund/ETF, domiciled " + prefix + " → exit tax (s.747E)", true}
-	case hasFund && isin == "":
-		ins.Regime = model.RegimeExitTax
-		return Suggestion{ins, "name indicates a fund but the export has no ISIN; CHECK domicile (EU/EEA/OECD → exit tax; elsewhere → s.747A, not modelled)", false}
+		return Classification{withRegime(ins, model.RegimeCGT), "name suggests ETC/ETN or leveraged product → CGT; CHECK", false, "name"}
 	case hasFund:
-		ins.Regime = model.RegimeExitTax
-		return Suggestion{ins, "name indicates a fund but domicile " + prefix + " is outside the EU/EEA/OECD list; CHECK whether s.747E or s.747A applies", false}
+		s := fundRegime(ins, prefix, "name suggests a fund", "name")
+		s.Confident = false
+		s.Reason += "; CHECK"
+		return s
 	default:
-		ins.Regime = model.RegimeCGT
-		return Suggestion{ins, "no fund keywords in name → assumed ordinary share → CGT", true}
+		return Classification{withRegime(ins, model.RegimeCGT), "no register data; no fund keywords in name → CGT by default; CHECK", false, "name"}
 	}
 }
 
-// SuggestAll produces one suggestion per distinct ISIN in the trades, sorted
-// by ticker. Known instruments are passed through unchanged.
-func SuggestAll(trades []model.Trade, known map[string]model.Instrument) []Suggestion {
-	seen := map[string]bool{}
-	var out []Suggestion
+func fundRegime(ins model.Instrument, prefix, evidence, source string) Classification {
+	_, isEEA := eea[prefix]
+	switch {
+	case isEEA:
+		return Classification{withRegime(ins, model.RegimeExitTax),
+			evidence + ", domiciled " + prefix + " (EU/EEA, presumed UCITS) → exit tax", true, source}
+	case prefix == "":
+		return Classification{withRegime(ins, model.RegimeExitTax),
+			evidence + ", domicile unknown (no ISIN); CHECK", false, source}
+	default:
+		return Classification{withRegime(ins, model.RegimeExitTax),
+			fmt.Sprintf("%s, domiciled %s (outside EU/EEA). Consider as exit tax by default; CHECK",
+				evidence, prefix), false, source}
+	}
+}
+
+func withRegime(ins model.Instrument, r model.Regime) model.Instrument {
+	ins.Regime = r
+	return ins
+}
+
+// ClassifyAll produces one classification per distinct instrument key in trades,
+// sorted by ticker. Known instruments are passed through unchanged. infos may
+// be nil.
+func ClassifyAll(trades []model.Trade, known map[string]model.Instrument, infos map[string]Info) []Classification {
+	seen := map[string]struct{}{}
+	var out []Classification
 	for _, t := range trades {
-		if seen[t.Key()] {
+		if _, se := seen[t.Key()]; se {
 			continue
 		}
-		seen[t.Key()] = true
+		seen[t.Key()] = struct{}{}
 		if k, ok := known[t.Key()]; ok {
 			if k.Ticker == "" {
 				k.Ticker = t.Ticker
@@ -105,10 +148,10 @@ func SuggestAll(trades []model.Trade, known map[string]model.Instrument) []Sugge
 			if k.Name == "" {
 				k.Name = t.Name
 			}
-			out = append(out, Suggestion{Instrument: k, Reason: "already in instruments.yaml", Confident: true})
+			out = append(out, Classification{Instrument: k, Reason: "already in instruments.yaml", Confident: true, Source: "user"})
 			continue
 		}
-		out = append(out, Guess(t.Key(), t.ISIN, t.Ticker, t.Name))
+		out = append(out, Classify(t.Key(), t.ISIN, t.Ticker, t.Name, infos[strings.ToUpper(t.ISIN)]))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Instrument.Ticker < out[j].Instrument.Ticker
@@ -116,15 +159,15 @@ func SuggestAll(trades []model.Trade, known map[string]model.Instrument) []Sugge
 	return out
 }
 
-// Unclassified returns trades who's instruments are not in known map.
+// Unclassified returns one trade per instrument key not present in known.
 func Unclassified(trades []model.Trade, known map[string]model.Instrument) []model.Trade {
-	seen := map[string]bool{}
+	seen := map[string]struct{}{}
 	var out []model.Trade
 	for _, t := range trades {
-		if seen[t.Key()] {
+		if _, se := seen[t.Key()]; se {
 			continue
 		}
-		seen[t.Key()] = true
+		seen[t.Key()] = struct{}{}
 		if _, ok := known[t.Key()]; !ok {
 			out = append(out, t)
 		}

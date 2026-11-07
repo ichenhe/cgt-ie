@@ -1,5 +1,3 @@
-// Command cgt computes Irish CGT (shares) and exit tax (EU UCITS ETFs) from
-// Trading 212 CSV exports.
 package main
 
 import (
@@ -53,7 +51,10 @@ func main() {
 		kong.Name("cgt"),
 		kong.Description("Irish CGT (shares) and exit tax (EU ETFs) calculator."),
 		kong.UsageOnError(),
-		kong.Vars{"default_fx_path": filepath.Join(os.TempDir(), "cgt-ie", "eurofxref-hist.csv")},
+		kong.Vars{"default_fx_path": filepath.Join(tmpDir, "eurofxref-hist.csv")},
 	)
 	ctx.FatalIfErrorf(ctx.Run())
 }
+
+var tmpDir = filepath.Join(os.TempDir(), "cgt-ie")
+var classifyRefDataCacheFile = filepath.Join(tmpDir, "refdata.json")

@@ -16,7 +16,7 @@ Irish **Capital Gains Tax** (shares) and **exit tax** (EU UCITS ETFs) calculator
    ./bin/cgt classify -o config/instruments.suggested.yaml exports/*.csv
    ```
 
-   Review each line (especially anything marked `CHECK`), then save it as `config/instruments.yaml`. The tool refuses to run with unclassified instruments because a wrong regime changes the rate by 5–8 points and can hide a deemed disposal.
+   Classification uses the instrument's legal form from public regulatory registers: the ISO 10962 CFI code in ESMA FIRDS (`E` equity, `D` debt such as ETCs, `C` fund), then the issuer category in GLEIF. Results are cached locally, so only new instruments need the network. Clear cases (shares, ADRs, ETCs, EU/EEA UCITS ETFs) are adopted automatically and `report` runs without this step; it stops only on instruments that need a human decision, chiefly **US-domiciled ETFs**, where since 1 January 2022 Revenue takes no view on whether the fund is "equivalent" (exit tax) or not (CGT). Review the `CHECK` lines, then save the file as `config/instruments.yaml`; entries there always win over the automatic result.
 
    Instruments are keyed by ISIN. For a broker whose export has no ISIN, the key is `broker:ticker` (e.g. `key: revolut:AAPL`) and you supply the ISIN in the entry.
 

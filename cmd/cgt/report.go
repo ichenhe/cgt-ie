@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/ichenhe/cgt-ie/internal/broker"
-	"github.com/ichenhe/cgt-ie/internal/classify"
 	"github.com/ichenhe/cgt-ie/internal/config"
 	"github.com/ichenhe/cgt-ie/internal/model"
 	"github.com/ichenhe/cgt-ie/internal/report"
@@ -119,17 +119,14 @@ func (c *reportCmd) Run() error {
 				"Note: holding foreign currency is itself a CGT asset; gains/losses on the cash balance are not computed here.", n))
 	}
 
-	// abort on unclassified instruments
-	if un := classify.Unclassified(parsed.Trades, instrs); len(un) > 0 {
-		var b strings.Builder
-		fmt.Fprintf(&b, "%d instrument(s) are not in %s:\n", len(un), instrPath)
-		for _, t := range un {
-			g := classify.Guess(t.Key(), t.ISIN, t.Ticker, t.Name)
-			fmt.Fprintf(&b, "  %-8s %-13s %-40s suggested: %s\n", t.Ticker, t.Key(), trunc(t.Name, 40), g.Instrument.Regime)
-		}
-		fmt.Fprintf(&b, "run 'cgt classify -o %s.suggested.yaml <exports>' and review it", strings.TrimSuffix(instrPath, ".yaml"))
-		return fmt.Errorf("%s", b.String())
+	// Classify instruments the user has not listed: regulatory registers
+	// decide the clear cases automatically; anything ambiguous stops the run.
+	res := resolveInstruments(context.Background(), parsed.Trades, instrs, classifyRefDataCacheFile)
+	warnings = append(warnings, res.Warnings...)
+	if len(res.Unresolved) > 0 {
+		return unresolvedError(res.Unresolved, instrPath, c.TxFiles)
 	}
+	instrs = res.Instruments
 
 	var cgtTrades, etfTrades []model.Trade
 	usFunds := map[string]struct{}{}
