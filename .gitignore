@@ -1,0 +1,24 @@
+bin/
+exports/
+cgt-reports/
+cache/
+*.suggested.yaml
+
+# IDEs
+.idea/
+.vscode/
+
+
+# mac
+.DS_Store
+.AppleDouble
+.LSOverride
+.Trashes
+
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.lnk

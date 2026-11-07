@@ -1,0 +1,10 @@
+instruments:
+    - isin: IE0003Z9E2Y3
+      ticker: 4COP
+      name: Global X Copper Miners (Acc)
+      regime: exit_tax
+    - isin: US0378331005
+      ticker: AAPL
+      name: Apple
+      regime: cgt
+ 
