@@ -24,7 +24,7 @@ func TestClassifyFromCFI(t *testing.T) {
 		{"SPDR S&P 500 ETF Trust", "US78462F1030", "CEOGES", model.RegimeExitTax, false},
 	}
 	for _, c := range cases {
-		got := Classify(c.isin, c.isin, "", c.name, Info{CFI: c.cfi})
+		got := Classify(c.isin, "t212", "", c.name, Info{CFI: c.cfi})
 		if got.Instrument.Regime != c.want || got.Confident != c.confident || got.Source != "cfi" {
 			t.Errorf("%s: got %s confident=%v src=%s (%s); want %s confident=%v",
 				c.name, got.Instrument.Regime, got.Confident, got.Source, got.Reason, c.want, c.confident)
@@ -33,11 +33,11 @@ func TestClassifyFromCFI(t *testing.T) {
 }
 
 func TestClassifyFromIssuerWhenNoCFI(t *testing.T) {
-	got := Classify("GB00B63H8491", "GB00B63H8491", "RR", "Rolls-Royce", Info{Issuer: IssuerCompany, IssuerName: "ROLLS-ROYCE HOLDINGS PLC"})
+	got := Classify("GB00B63H8491", "t212", "RR", "Rolls-Royce", Info{Issuer: IssuerCompany, IssuerName: "ROLLS-ROYCE HOLDINGS PLC"})
 	if got.Instrument.Regime != model.RegimeCGT || !got.Confident || got.Source != "issuer" {
 		t.Errorf("RR: %+v", got)
 	}
-	got = Classify("IE00B5BMR087", "IE00B5BMR087", "CSPX", "iShares Core S&P 500", Info{Issuer: IssuerFund, IssuerName: "ISHARES VII PLC"})
+	got = Classify("IE00B5BMR087", "t212", "CSPX", "iShares Core S&P 500", Info{Issuer: IssuerFund, IssuerName: "ISHARES VII PLC"})
 	if got.Instrument.Regime != model.RegimeExitTax || !got.Confident || got.Source != "issuer" {
 		t.Errorf("CSPX via issuer: %+v", got)
 	}
@@ -55,7 +55,7 @@ func TestClassifyFallsBackToNameAndIsNeverConfident(t *testing.T) {
 		{"", "VUSA", "Vanguard S&P 500 UCITS ETF", model.RegimeExitTax},
 	}
 	for _, c := range cases {
-		got := Classify(c.isin, c.isin, c.ticker, c.name, Info{})
+		got := Classify(c.isin, "t212", c.ticker, c.name, Info{})
 		if got.Instrument.Regime != c.want || got.Confident || got.Source != "name" || !strings.Contains(got.Reason, "CHECK") {
 			t.Errorf("%s: %+v", c.ticker, got)
 		}
@@ -69,7 +69,7 @@ func TestClassifyAllUsesInfosAndKnown(t *testing.T) {
 		{ISIN: "GB00B63H8491", Ticker: "RR", Name: "Rolls-Royce"},
 		{ISIN: "US0378331005", Ticker: "AAPL", Name: "Apple"}, // duplicate
 	}
-	known := map[string]model.Instrument{"GB00B63H8491": {Key: "GB00B63H8491", ISIN: "GB00B63H8491", Regime: model.RegimeCGT}}
+	known := fakeOverrides{"GB00B63H8491": {ISIN: "GB00B63H8491", Regime: model.RegimeCGT}}
 	infos := map[string]Info{
 		"US0378331005": {CFI: "ESVUFR"},
 		"IE00B5BMR087": {CFI: "CEOGES"},
@@ -87,13 +87,14 @@ func TestClassifyAllUsesInfosAndKnown(t *testing.T) {
 	}
 }
 
-func TestUnclassified(t *testing.T) {
-	trades := []model.Trade{
-		{ISIN: "A", Ticker: "A"}, {ISIN: "B", Ticker: "B"}, {ISIN: "A", Ticker: "A"},
+// fakeOverrides matches by ISIN only and, like config.Overrides, returns
+// the trade's own identifiers.
+type fakeOverrides map[string]model.Instrument
+
+func (f fakeOverrides) Lookup(t model.Trade) (model.Instrument, bool) {
+	in, ok := f[t.ISIN]
+	if ok {
+		in.ISIN, in.Broker, in.Ticker = t.ISIN, t.Source.Broker, t.Ticker
 	}
-	known := map[string]model.Instrument{"A": {Key: "A", ISIN: "A", Regime: model.RegimeCGT}}
-	u := Unclassified(trades, known)
-	if len(u) != 1 || u[0].ISIN != "B" {
-		t.Errorf("unclassified = %+v", u)
-	}
+	return in, ok
 }

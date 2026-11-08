@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -97,34 +98,59 @@ func LoadRules(path string) (Rules, error) {
 	return r, nil
 }
 
-// instrumentsFile is the on-disk shape of instruments.yaml.
+// instrumentsFile is the on-disk shape of an --instruments file.
 type instrumentsFile struct {
 	Instruments []instrumentEntry `yaml:"instruments"`
 }
 
 type instrumentEntry struct {
-	// Exactly one of isin / key identifies the security. key is
-	// "broker:ticker" for brokers whose exports carry no ISIN.
+	// An entry is matched to trades by isin when given; otherwise by ticker,
+	// narrowed to one broker if broker is given.
 	ISIN   string `yaml:"isin,omitempty"`
-	Key    string `yaml:"key,omitempty"`
 	Ticker string `yaml:"ticker,omitempty"`
+	Broker string `yaml:"broker,omitempty"`
 	Name   string `yaml:"name,omitempty"`
 	Regime string `yaml:"regime"`
 	Note   string `yaml:"note,omitempty"`
 }
 
-// Instruments maps Trade.Key() (ISIN or broker:ticker) → classification.
-type Instruments map[string]model.Instrument
+// Overrides are the user-assigned classifications.
+type Overrides []model.Instrument
 
-// LoadInstruments reads instruments.yaml. A missing file is not an error:
-// it returns an empty map so the caller can report every ISIN as
-// unclassified.
-func LoadInstruments(path string) (Instruments, error) {
-	out := Instruments{}
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return out, nil
+// Lookup returns the override matching a trade: by ISIN first, then by
+// ticker (and broker, if the entry names one). The result carries the
+// trade's own identifiers, and its name where the entry has none, so that
+// Instrument.Key() equals Trade.Key().
+func (o Overrides) Lookup(t model.Trade) (model.Instrument, bool) {
+	match := func(item model.Instrument) (model.Instrument, bool) {
+		item.ISIN, item.Broker, item.Ticker = t.ISIN, t.Source.Broker, t.Ticker
+		if item.Name == "" {
+			item.Name = t.Name
+		}
+		return item, true
 	}
+	if t.ISIN != "" {
+		for _, item := range o {
+			if strings.EqualFold(item.ISIN, t.ISIN) {
+				return match(item)
+			}
+		}
+	}
+	for _, item := range o {
+		if item.ISIN != "" || !strings.EqualFold(item.Ticker, t.Ticker) {
+			continue
+		}
+		if item.Broker != "" && !strings.EqualFold(item.Broker, t.Source.Broker) {
+			continue
+		}
+		return match(item)
+	}
+	return model.Instrument{}, false
+}
+
+// LoadInstruments reads an yaml file.
+func LoadInstruments(path string) (Overrides, error) {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -132,32 +158,33 @@ func LoadInstruments(path string) (Instruments, error) {
 	if err := yaml.Unmarshal(b, &f); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	out := make(Overrides, 0, len(f.Instruments))
+	seenISIN := map[string]struct{}{}
 	for i, e := range f.Instruments {
-		key := e.ISIN
-		if key == "" {
-			key = e.Key
-		}
-		if key == "" {
-			return nil, fmt.Errorf("%s: instruments[%d] needs isin or key", path, i)
+		if e.ISIN == "" && e.Ticker == "" {
+			return nil, fmt.Errorf("%s: instruments[%d] needs isin or ticker", path, i)
 		}
 		reg := model.Regime(e.Regime)
-		switch reg {
-		case model.RegimeCGT, model.RegimeExitTax:
-		default:
-			return nil, fmt.Errorf("%s: instruments[%d] (%s) regime must be %q or %q, got %q",
-				path, i, key, model.RegimeCGT, model.RegimeExitTax, e.Regime)
+		if reg != model.RegimeCGT && reg != model.RegimeExitTax {
+			return nil, fmt.Errorf("%s: instruments[%d] (%s%s) regime must be %q or %q, got %q",
+				path, i, e.ISIN, e.Ticker, model.RegimeCGT, model.RegimeExitTax, e.Regime)
 		}
-		if _, dup := out[key]; dup {
-			return nil, fmt.Errorf("%s: duplicate instrument %s", path, key)
+
+		isin := strings.ToUpper(e.ISIN)
+		if isin != "" {
+			if _, ex := seenISIN[isin]; ex {
+				return nil, fmt.Errorf("%s: duplicate isin %s", path, isin)
+			}
+			seenISIN[isin] = struct{}{}
 		}
-		out[key] = model.Instrument{Key: key, ISIN: e.ISIN, Ticker: e.Ticker, Name: e.Name, Regime: reg}
+		out = append(out, model.Instrument{ISIN: isin, Broker: e.Broker, Ticker: e.Ticker, Name: e.Name, Regime: reg})
 	}
 	return out, nil
 }
 
-// WriteInstruments writes a list of instruments in the same YAML shape that
-// LoadInstruments reads. Used by the classifier to emit a file.
-func WriteInstruments(path string, list []model.Instrument, notes map[string]string) error {
+// MarshalInstruments renders instruments in the YAML shape LoadInstruments
+// reads. notes, keyed by Instrument.Key(), become each entry's note field.
+func MarshalInstruments(list []model.Instrument, notes map[string]string) ([]byte, error) {
 	f := instrumentsFile{}
 	for _, in := range list {
 		e := instrumentEntry{
@@ -165,17 +192,22 @@ func WriteInstruments(path string, list []model.Instrument, notes map[string]str
 			Ticker: in.Ticker,
 			Name:   in.Name,
 			Regime: string(in.Regime),
-			Note:   notes[in.Key],
+			Note:   notes[in.Key()],
 		}
 		if in.ISIN == "" {
-			e.Key = in.Key
+			e.Broker = in.Broker
 		}
 		f.Instruments = append(f.Instruments, e)
 	}
-	b, err := yaml.Marshal(&f)
+	return yaml.Marshal(&f)
+}
+
+// WriteInstruments writes MarshalInstruments output to path with a header.
+func WriteInstruments(path string, list []model.Instrument, notes map[string]string) error {
+	b, err := MarshalInstruments(list, notes)
 	if err != nil {
 		return err
 	}
-	header := "# Suggested classification. REVIEW EVERY LINE, then save as instruments.yaml.\n"
+	header := "# Instrument classifications in the format accepted by --instruments. Entries in that file override the automatic ones.\n"
 	return os.WriteFile(path, append([]byte(header), b...), 0o644)
 }

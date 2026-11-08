@@ -138,11 +138,20 @@ func (t Trade) Day() time.Time {
 	return Day(t.Time)
 }
 
-// Instrument is the user-confirmed classification of a security.
+// Instrument is a classified security.
 type Instrument struct {
-	Key    string // ISIN or broker:ticker; what Trade.Key() returns
 	ISIN   string
+	Broker string // parser name; only meaningful when ISIN is empty
 	Ticker string
 	Name   string
 	Regime Regime
+}
+
+// Key identifies the security the same way Trade.Key does: ISIN when known,
+// otherwise "broker:ticker".
+func (i Instrument) Key() string {
+	if i.ISIN != "" {
+		return i.ISIN
+	}
+	return i.Broker + ":" + i.Ticker
 }

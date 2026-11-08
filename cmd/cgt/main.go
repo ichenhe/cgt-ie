@@ -9,19 +9,20 @@ import (
 
 	"github.com/ichenhe/cgt-ie/internal/broker"
 	"github.com/ichenhe/cgt-ie/internal/broker/t212"
+	"github.com/ichenhe/cgt-ie/internal/config"
 )
 
 // cli is the top level command tree.
 type cli struct {
 	Report   reportCmd   `cmd:"" help:"Compute CGT and exit tax and write the reports."`
-	Classify classifyCmd `cmd:"" help:"Suggest instruments.yaml entries for the instruments in the exports."`
+	Classify classifyCmd `cmd:"" help:"Show how each instrument would be classified."`
 	FXUpdate fxUpdateCmd `cmd:"" name:"fx-update" help:"Download the ECB daily EUR reference rates (needed when trades were settled in USD/GBP)."`
 }
 
 type configFlags struct {
-	ConfigDir   string `help:"Directory containing rules.yaml and instruments.yaml." default:"config" type:"existingdir" placeholder:"PATH"`
+	ConfigDir   string `help:"Directory containing rules.yaml." default:"config" type:"existingdir" placeholder:"PATH"`
 	Rules       string `help:"Path to rules.yaml (overrides --config-dir)." type:"existingfile" placeholder:"PATH"`
-	Instruments string `help:"Path to instruments.yaml (overrides --config-dir)." type:"existingfile" placeholder:"PATH"`
+	Instruments string `help:"Optional YAML of instrument classifications that override the automatic ones." type:"existingfile" placeholder:"PATH"`
 }
 
 func (c *configFlags) rulesPath() string {
@@ -31,11 +32,12 @@ func (c *configFlags) rulesPath() string {
 	return filepath.Join(c.ConfigDir, "rules.yaml")
 }
 
-func (c *configFlags) instrumentsPath() string {
-	if c.Instruments != "" {
-		return c.Instruments
+// loadOverrides reads the user's optional instrument overrides.
+func (c *configFlags) loadOverrides() (config.Overrides, error) {
+	if c.Instruments == "" {
+		return nil, nil
 	}
-	return filepath.Join(c.ConfigDir, "instruments.yaml")
+	return config.LoadInstruments(c.Instruments)
 }
 
 func loadTrades(files []string) (broker.Result, error) {

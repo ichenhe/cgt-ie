@@ -12,9 +12,9 @@
 //
 // fundRegime: a fund domiciled in the EU/EEA is almost always a UCITS and
 // therefore an "equivalent" offshore fund taxed under exit tax. A fund
-// domiciled in another OECD treaty state (e.g. US), is exit-tax-eligible only
-// if it is "similar in all material respects" to an Irish regulated fund.
-// This package considers all founs as exit tax by default.
+// domiciled elsewhere (e.g. the US) is in that regime only if it is "similar
+// in all material respects" to an Irish regulated fund, which the investor
+// must judge; such funds are suggested as exit tax but never confident.
 package classify
 
 import (
@@ -25,7 +25,8 @@ import (
 	"github.com/ichenhe/cgt-ie/internal/model"
 )
 
-// Classification is a guessed classification with the reason.
+// Classification is the regime decided for one instrument, with the evidence
+// behind it. Only Confident results may be used without review.
 type Classification struct {
 	Instrument model.Instrument
 	Reason     string
@@ -52,8 +53,7 @@ var etcWords = []string{
 	"brent", "wti", "crude oil", "natural gas", "bitcoin", "ethereum", "crypto",
 }
 
-// eea lists ISIN prefixes of EU/EEA states. A fund domiciled here is
-// presumed UCITS-equivalent.
+// eea lists ISIN prefixes of EU/EEA states.
 var eea = map[string]struct{}{
 	"AT": {}, "BE": {}, "BG": {}, "HR": {}, "CY": {}, "CZ": {}, "DK": {},
 	"EE": {}, "FI": {}, "FR": {}, "DE": {}, "GR": {}, "HU": {}, "IE": {},
@@ -62,14 +62,26 @@ var eea = map[string]struct{}{
 	"LI": {}, "NO": {},
 }
 
+// EEADomiciled reports whether an ISIN's country prefix is an EU/EEA state.
+// A fund domiciled there is presumed to be a UCITS and therefore an
+// "equivalent" offshore fund.
+func EEADomiciled(isin string) bool {
+	_, ok := eea[prefixOf(isin)]
+	return ok
+}
+
+func prefixOf(isin string) string {
+	if len(isin) >= 2 {
+		return strings.ToUpper(isin[:2])
+	}
+	return ""
+}
+
 // Classify decides the regime for one instrument from whatever is known
 // about it (info may be the zero value).
-func Classify(key, isin, ticker, name string, info Info) Classification {
-	ins := model.Instrument{Key: key, ISIN: isin, Ticker: ticker, Name: name}
-	prefix := ""
-	if len(isin) >= 2 {
-		prefix = strings.ToUpper(isin[:2])
-	}
+func Classify(isin, broker, ticker, name string, info Info) Classification {
+	ins := model.Instrument{ISIN: isin, Broker: broker, Ticker: ticker, Name: name}
+	prefix := prefixOf(isin)
 	// 1. CFI code.
 	if info.CFI != "" {
 		switch info.CFI[0] {
@@ -110,9 +122,8 @@ func Classify(key, isin, ticker, name string, info Info) Classification {
 }
 
 func fundRegime(ins model.Instrument, prefix, evidence, source string) Classification {
-	_, isEEA := eea[prefix]
 	switch {
-	case isEEA:
+	case EEADomiciled(ins.ISIN):
 		return Classification{withRegime(ins, model.RegimeExitTax),
 			evidence + ", domiciled " + prefix + " (EU/EEA, presumed UCITS) → exit tax", true, source}
 	case prefix == "":
@@ -130,28 +141,26 @@ func withRegime(ins model.Instrument, r model.Regime) model.Instrument {
 	return ins
 }
 
-// ClassifyAll produces one classification per distinct instrument key in trades,
-// sorted by ticker. Known instruments are passed through unchanged. infos may
-// be nil.
-func ClassifyAll(trades []model.Trade, known map[string]model.Instrument, infos map[string]Info) []Classification {
+// Overrides supplies user-made classifications.
+type Overrides interface {
+	Lookup(t model.Trade) (model.Instrument, bool)
+}
+
+// ClassifyAll produces one Classification per distinct instrument in trades.
+// known and infos may be nil.
+func ClassifyAll(trades []model.Trade, known Overrides, infos map[string]Info) []Classification {
 	seen := map[string]struct{}{}
 	var out []Classification
 	for _, t := range trades {
-		if _, se := seen[t.Key()]; se {
+		if _, dup := seen[t.Key()]; dup {
 			continue
 		}
 		seen[t.Key()] = struct{}{}
-		if k, ok := known[t.Key()]; ok {
-			if k.Ticker == "" {
-				k.Ticker = t.Ticker
-			}
-			if k.Name == "" {
-				k.Name = t.Name
-			}
-			out = append(out, Classification{Instrument: k, Reason: "already in instruments.yaml", Confident: true, Source: "user"})
+		if k, ok := lookup(known, t); ok {
+			out = append(out, Classification{Instrument: k, Reason: "set in --instruments", Confident: true, Source: "user"})
 			continue
 		}
-		out = append(out, Classify(t.Key(), t.ISIN, t.Ticker, t.Name, infos[strings.ToUpper(t.ISIN)]))
+		out = append(out, Classify(t.ISIN, t.Source.Broker, t.Ticker, t.Name, infos[strings.ToUpper(t.ISIN)]))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Instrument.Ticker < out[j].Instrument.Ticker
@@ -159,20 +168,11 @@ func ClassifyAll(trades []model.Trade, known map[string]model.Instrument, infos 
 	return out
 }
 
-// Unclassified returns one trade per instrument key not present in known.
-func Unclassified(trades []model.Trade, known map[string]model.Instrument) []model.Trade {
-	seen := map[string]struct{}{}
-	var out []model.Trade
-	for _, t := range trades {
-		if _, se := seen[t.Key()]; se {
-			continue
-		}
-		seen[t.Key()] = struct{}{}
-		if _, ok := known[t.Key()]; !ok {
-			out = append(out, t)
-		}
+func lookup(known Overrides, t model.Trade) (model.Instrument, bool) {
+	if known == nil {
+		return model.Instrument{}, false
 	}
-	return out
+	return known.Lookup(t)
 }
 
 func containsAny(s string, words []string) bool {

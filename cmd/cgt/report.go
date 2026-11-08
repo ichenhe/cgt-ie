@@ -13,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/ichenhe/cgt-ie/internal/broker"
+	"github.com/ichenhe/cgt-ie/internal/classify"
 	"github.com/ichenhe/cgt-ie/internal/config"
 	"github.com/ichenhe/cgt-ie/internal/model"
 	"github.com/ichenhe/cgt-ie/internal/report"
@@ -60,8 +61,7 @@ func (c *reportCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	instrPath := c.instrumentsPath()
-	instrs, err := config.LoadInstruments(instrPath)
+	overrides, err := c.loadOverrides()
 	if err != nil {
 		return err
 	}
@@ -121,35 +121,35 @@ func (c *reportCmd) Run() error {
 
 	// Classify instruments the user has not listed: regulatory registers
 	// decide the clear cases automatically; anything ambiguous stops the run.
-	res := resolveInstruments(context.Background(), parsed.Trades, instrs, classifyRefDataCacheFile)
+	res := resolveInstruments(context.Background(), parsed.Trades, overrides, classifyRefDataCacheFile)
 	warnings = append(warnings, res.Warnings...)
 	if len(res.Unresolved) > 0 {
-		return unresolvedError(res.Unresolved, instrPath, c.TxFiles)
+		return unresolvedError(res.Unresolved, c.Instruments)
 	}
-	instrs = res.Instruments
+	instruments := res.Instruments
 
 	var cgtTrades, etfTrades []model.Trade
-	usFunds := map[string]struct{}{}
+	nonEEAFunds := map[string]struct{}{}
 	for _, t := range parsed.Trades {
-		switch instrs[t.Key()].Regime {
+		switch instruments[t.Key()].Regime {
 		case model.RegimeCGT:
 			cgtTrades = append(cgtTrades, t)
 		case model.RegimeExitTax:
 			etfTrades = append(etfTrades, t)
-			if isin := instrs[t.Key()].ISIN; strings.HasPrefix(strings.ToUpper(isin), "US") {
-				usFunds[t.Ticker] = struct{}{}
+			if isin := instruments[t.Key()].ISIN; isin != "" && !classify.EEADomiciled(isin) {
+				nonEEAFunds[t.Ticker] = struct{}{}
 			}
 		}
 	}
-	if len(usFunds) > 0 {
-		tickers := make([]string, 0, len(usFunds))
-		for k := range usFunds {
+	if len(nonEEAFunds) > 0 {
+		tickers := make([]string, 0, len(nonEEAFunds))
+		for k := range nonEEAFunds {
 			tickers = append(tickers, k)
 		}
 		sort.Strings(tickers)
 		warnings = append(warnings, fmt.Sprintf(
-			"US-domiciled fund(s) %s are taxed here as exit tax. Revenue has given no confirmation either way since 1 Jan 2022 (TDM 27-01A-03): "+
-				"exit tax applies only if the fund is 'similar in all material respects' to an Irish fund (s.747B(2A)); otherwise CGT. "+
+			"Non-EEA-domiciled fund(s) %s are taxed here as exit tax. "+
+				"Exit tax applies only if the fund is 'similar in all material respects' to an Irish fund (s.747B(2A)); otherwise CGT. "+
 				"For units held before 2022 the 8-year deemed-disposal clock runs from 2022 (earliest 2030), which this tool does not adjust.",
 			strings.Join(tickers, ", ")))
 	}
@@ -175,7 +175,7 @@ func (c *reportCmd) Run() error {
 		Year:                   c.Year,
 		CGT:                    cgtRes,
 		ExitTax:                etfRes,
-		Instruments:            instrs,
+		Instruments:            instruments,
 		Warnings:               warnings,
 		GeneratedAt:            now,
 		LossRestrictionApplied: !c.NoLossRestriction,
@@ -196,6 +196,11 @@ func (c *reportCmd) Run() error {
 	}
 	mdPath := filepath.Join(c.OutputDir, "report"+suffix+".md")
 	csvPath := filepath.Join(c.OutputDir, "sales-breakdown"+suffix+".csv")
+	classificationPath := filepath.Join(c.OutputDir, "instruments"+suffix+".yaml")
+
+	if err := writeClassifications(classificationPath, res.Classifications); err != nil {
+		return err
+	}
 
 	mdf, err := os.Create(mdPath)
 	if err != nil {
@@ -213,7 +218,7 @@ func (c *reportCmd) Run() error {
 		return err
 	}
 
-	generated := []string{mdPath, filepath.Base(csvPath)}
+	generated := []string{mdPath, filepath.Base(csvPath), filepath.Base(classificationPath)}
 
 	// Keep the rate table that produced the figures next to the report, named
 	// by the latest rate date it contains, so the computation can be

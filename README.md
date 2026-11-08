@@ -10,17 +10,7 @@ Irish **Capital Gains Tax** (shares) and **exit tax** (EU UCITS ETFs) calculator
 
 1. Export your **complete** history CSV from Trading 212 (History → Export). If one export does not cover everything, export several. Missing buy transactions will result in compute failure because the cost can not be determined.
 
-2. Classify every instrument once:
-
-   ```sh
-   ./bin/cgt classify -o config/instruments.suggested.yaml exports/*.csv
-   ```
-
-   Classification uses the instrument's legal form from public regulatory registers: the ISO 10962 CFI code in ESMA FIRDS (`E` equity, `D` debt such as ETCs, `C` fund), then the issuer category in GLEIF. Results are cached locally, so only new instruments need the network. Clear cases (shares, ADRs, ETCs, EU/EEA UCITS ETFs) are adopted automatically and `report` runs without this step; it stops only on instruments that need a human decision, chiefly **US-domiciled ETFs**, where since 1 January 2022 Revenue takes no view on whether the fund is "equivalent" (exit tax) or not (CGT). Review the `CHECK` lines, then save the file as `config/instruments.yaml`; entries there always win over the automatic result.
-
-   Instruments are keyed by ISIN. For a broker whose export has no ISIN, the key is `broker:ticker` (e.g. `key: revolut:AAPL`) and you supply the ISIN in the entry.
-
-3. Run the report:
+2. Run the report:
 
    ```sh
    ./bin/cgt report exports/*.csv                       # all transactions in exports
@@ -28,6 +18,23 @@ Irish **Capital Gains Tax** (shares) and **exit tax** (EU UCITS ETFs) calculator
    ./bin/cgt report --no-loss-restriction exports/*.csv # disable s.581(3)
    ./bin/cgt report --losses-forward 1500 exports/*.csv # CGT losses from before your first export
    ```
+
+### Classification
+
+   Most instruments are classified automatically from public regulatory registers. However, in some cases your confirmation is required:
+
+   - **Non-EU-domiciled ETFs**: Exit tax applies only if the fund is 'similar in all material respects' to an Irish fund (s.747B(2A)); otherwise CGT. This tool suggests exit-tax by default.
+   - **Unknown instruments**: ISIN is not available in your export transactions or can not find it in the supported registers
+
+`cgt report` stops on instruments that need a human decision and prints a ready-to-paste YAML block. Simply save it, review it, set the regime and pass it with `--instruments`: 
+
+```sh
+cgt report --instruments instruments.yaml exports/*.csv
+```
+
+Entries in that file always win over the automatic result. Every run also writes `instruments-used-<years>.yaml` to the output directory, listing how each instrument was classified and why. It is in the same format so you can edit/use it as `--instruments`.
+
+Besides, `cgt classify exports/*.csv -o instruments.yaml` prints a classification table and writes same yaml file without computing the tax.
 
 ## Implemented rules
 
