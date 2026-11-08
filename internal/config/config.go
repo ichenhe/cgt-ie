@@ -1,6 +1,7 @@
 package config
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"sort"
@@ -68,16 +69,25 @@ func sortBands(b []RateBand) {
 	sort.Slice(b, func(i, j int) bool { return b[i].From.Before(b[j].From) })
 }
 
-// LoadRules reads and validates rules.yaml.
+//go:embed rules.default.yaml
+var defaultRules []byte
+
+// LoadRules returns the merged tax rules.
 func LoadRules(path string) (Rules, error) {
 	var r Rules
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return r, err
+	if err := yaml.Unmarshal(defaultRules, &r); err != nil {
+		return r, fmt.Errorf("embedded default rules: %w", err)
 	}
-	if err := yaml.Unmarshal(b, &r); err != nil {
-		return r, fmt.Errorf("parse %s: %w", path, err)
+	if path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return r, err
+		}
+		if err := yaml.Unmarshal(b, &r); err != nil {
+			return r, fmt.Errorf("%s: %w", path, err)
+		}
 	}
+
 	if len(r.CGT.Rates) == 0 {
 		return r, fmt.Errorf("%s: cgt.rates must not be empty", path)
 	}

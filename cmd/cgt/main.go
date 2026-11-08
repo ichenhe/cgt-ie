@@ -20,16 +20,8 @@ type cli struct {
 }
 
 type configFlags struct {
-	ConfigDir   string `help:"Directory containing rules.yaml." default:"config" type:"existingdir" placeholder:"PATH"`
-	Rules       string `help:"Path to rules.yaml (overrides --config-dir)." type:"existingfile" placeholder:"PATH"`
+	Rules       string `help:"Optional YAML overriding the built-in tax rules; omitted keys retain default value." type:"existingfile" placeholder:"PATH"`
 	Instruments string `help:"Optional YAML of instrument classifications that override the automatic ones." type:"existingfile" placeholder:"PATH"`
-}
-
-func (c *configFlags) rulesPath() string {
-	if c.Rules != "" {
-		return c.Rules
-	}
-	return filepath.Join(c.ConfigDir, "rules.yaml")
 }
 
 // loadOverrides reads the user's optional instrument overrides.

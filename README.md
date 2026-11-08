@@ -36,6 +36,12 @@ Entries in that file always win over the automatic result. Every run also writes
 
 Besides, `cgt classify exports/*.csv -o instruments.yaml` prints a classification table and writes same yaml file without computing the tax.
 
+### Configuration
+
+This tool has embedded default configs and simply works.
+
+In case you want to customize tax rules, take [`internal/config/rules.default.yaml`](./internal/config/rules.default.yaml) as reference, make changes and pass your config file via `--rules`.
+
 ## Implemented rules
 
 See [docs/irish-tax-rules.md](docs/irish-tax-rules.md) for detailed rules this tool references.

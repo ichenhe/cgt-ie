@@ -57,7 +57,7 @@ func (d *dateFlag) UnmarshalText(b []byte) error {
 }
 
 func (c *reportCmd) Run() error {
-	rules, err := config.LoadRules(c.rulesPath())
+	rules, err := config.LoadRules(c.Rules)
 	if err != nil {
 		return err
 	}

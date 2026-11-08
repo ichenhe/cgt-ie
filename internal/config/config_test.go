@@ -11,7 +11,7 @@ import (
 )
 
 func TestLoadRulesAndRateOn(t *testing.T) {
-	r, err := LoadRules("../../config/rules.yaml")
+	r, err := LoadRules("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +52,32 @@ func TestLoadRulesAndRateOn(t *testing.T) {
 	}
 	if _, err := r.ExitTax.RateOn(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err == nil {
 		t.Error("expected error for date before first band")
+	}
+}
+
+// A user file sets only what it wants to change; everything else stays default.
+func TestLoadRulesPartialOverride(t *testing.T) {
+	path := t.TempDir() + "/rules.yaml"
+	os.WriteFile(path, []byte("cgt:\n  annual_exemption: 2000.1234567890123456789\nexit_tax:\n  rates:\n    - from: 2020-01-01\n      rate: 0.5\n"), 0o644)
+	r, err := LoadRules(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Decimals are read from their text: no float64 on the way.
+	if r.CGT.AnnualExemption.String() != "2000.1234567890123456789" {
+		t.Errorf("exemption = %s", r.CGT.AnnualExemption)
+	}
+	if len(r.CGT.Rates) != 2 || r.CGT.MatchingWindow != 28 { // defaults kept
+		t.Errorf("cgt defaults lost: %+v", r.CGT)
+	}
+	if len(r.ExitTax.Rates) != 1 || !r.ExitTax.Rates[0].Rate.Equal(decimal.RequireFromString("0.5")) { // list replaced whole
+		t.Errorf("exit rates = %+v", r.ExitTax.Rates)
+	}
+	if r.ExitTax.DeemedDisposalYrs != 8 {
+		t.Errorf("deemed years = %d", r.ExitTax.DeemedDisposalYrs)
+	}
+	if _, err := LoadRules(t.TempDir() + "/missing.yaml"); err == nil {
+		t.Error("explicit missing file should error")
 	}
 }
 

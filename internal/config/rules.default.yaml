@@ -1,0 +1,19 @@
+cgt:
+  rates:
+    - from: 2012-12-06
+      rate: 0.33
+    - from: 2026-10-07
+      rate: 0.31
+  annual_exemption: 1270
+  matching_window_days: 28
+  reacquisition_window_days: 28
+
+exit_tax:
+  deemed_disposal_years: 8
+  rates:
+    - from: 2014-01-01
+      rate: 0.41
+    - from: 2026-01-01
+      rate: 0.38
+    - from: 2027-01-01
+      rate: 0.35
