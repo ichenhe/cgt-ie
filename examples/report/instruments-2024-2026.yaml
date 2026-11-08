@@ -1,0 +1,32 @@
+# Instrument classifications in the format accepted by --instruments. Entries in that file override the automatic ones.
+instruments:
+    - isin: US0378331005
+      ticker: AAPL
+      name: Apple
+      regime: cgt
+      note: 'cfi: CFI ESVUFR: equity → CGT'
+    - isin: IE00B5BMR087
+      ticker: CSPX
+      name: iShares Core S&P 500 UCITS ETF USD (Acc)
+      regime: exit_tax
+      note: 'issuer: issuer ISHARES VII PUBLIC LIMITED COMPANY is a fund, domiciled IE (EU/EEA, presumed UCITS) → exit tax'
+    - isin: IE00BMTX1Y45
+      ticker: I500
+      name: iShares S&P 500 Swap (Acc)
+      regime: exit_tax
+      note: 'cfi: CFI CEOGDS: collective investment vehicle, domiciled IE (EU/EEA, presumed UCITS) → exit tax'
+    - isin: US67066G1040
+      ticker: NVDA
+      name: Nvidia
+      regime: cgt
+      note: 'cfi: CFI ESVUFR: equity → CGT'
+    - isin: JE00B1VS3770
+      ticker: PHAU
+      name: WisdomTree Physical Gold
+      regime: cgt
+      note: 'issuer: issuer WISDOMTREE METAL SECURITIES LIMITED is a company, not a fund → CGT'
+    - isin: DE0007030009
+      ticker: RHM
+      name: Rheinmetall
+      regime: cgt
+      note: 'cfi: CFI ESVUFB: equity → CGT'

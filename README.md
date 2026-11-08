@@ -5,6 +5,9 @@ Irish **Capital Gains Tax** (shares) and **exit tax** (EU UCITS ETFs) calculator
 > [!IMPORTANT]
 > Calculation aid, not tax advice. Verify the result before filing. The authors and contributors accept no liability for calculation errors.
 
+## Example
+
+[`examples/`](examples/README.md) has a small synthetic data set covering every rule (4-week LIFO, s.581(3) full and partial restriction, December payment split, the 2026 mid-year rate change, exit tax at two rates, a disallowed fund loss, an overdue deemed disposal). Also check [report it produces](examples/report/report-2024-2026.md) to see what this tool can do for you.
 
 ## Usage
 

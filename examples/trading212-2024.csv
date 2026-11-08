@@ -1,0 +1,9 @@
+Action,Time (UTC),ISIN,Ticker,Name,Notes,ID,No. of shares,Price / share,Currency (Price / share),Exchange rate,Result,Currency (Result),Total,Currency (Total),Withholding tax,Currency (Withholding tax),Currency conversion from amount,Currency (Currency conversion from amount),Currency conversion to amount,Currency (Currency conversion to amount),Currency conversion fee,Currency (Currency conversion fee),Merchant name,Merchant category
+Deposit,2024-01-08 10:00:00+00:00,,,,,EOF41000064217,,,,,,,5000.00,EUR,,,,,,,,,,
+Market buy,2024-01-10 14:31:02+00:00,US0378331005,AAPL,Apple,,EOF41000116967,10.0000000000,185.4000000000,USD,1.09520000,,,1693.09,EUR,,,,,,,0.25,EUR,,
+Market buy,2024-03-05 08:05:11+00:00,DE0007030009,RHM,Rheinmetall,,EOF41000203286,5.0000000000,421.6000000000,EUR,1.00000000,,,2108.00,EUR,,,,,,,,,,
+Market buy,2024-07-01 13:30:05+00:00,US67066G1040,NVDA,Nvidia,,EOF41000210614,20.0000000000,124.3000000000,USD,1.07310000,,,2317.00,EUR,,,,,,,0.35,EUR,,
+Market sell,2024-09-03 13:45:40+00:00,US0378331005,AAPL,Apple,,EOF41000221108,4.0000000000,222.7700000000,USD,1.10650000,128.18,EUR,805.19,EUR,,,,,,,0.12,EUR,,
+Market sell,2024-11-20 09:01:15+00:00,DE0007030009,RHM,Rheinmetall,,EOF41000292347,3.0000000000,601.8000000000,EUR,1.00000000,540.60,EUR,1805.40,EUR,,,,,,,,,,
+Interest on cash,2024-11-30 02:00:00+00:00,,,,Interest on cash,EOF41000305684,,,,,,,3.21,EUR,,,,,,,,,,
+Market sell,2024-12-10 14:30:09+00:00,US67066G1040,NVDA,Nvidia,,EOF41000354615,5.0000000000,138.9000000000,USD,1.05120000,81.51,EUR,660.57,EUR,,,,,,,0.10,EUR,,
