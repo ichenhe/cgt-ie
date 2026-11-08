@@ -254,27 +254,28 @@ func copyFile(src, dst string) error {
 }
 
 // crossCheck compares our per-disposal gain with Trading 212's own "Result"
-// column. Trading 212 uses average cost and ignores all fees, so small
-// differences are normal and larger ones are expected whenever the 4-week
-// LIFO rule bites. A gap of the same order as the proceeds usually means
-// earlier buys are missing from the exports.
+// column. Trading 212 uses average cost on gross amounts (no fees); Irish law
+// requires 4-week LIFO then FIFO with incidental costs, so differences are
+// normal. Our gain being well below Trading 212's is the one pattern worth a
+// warning: it is what missing earlier (cheaper) buys looks like. Our gain
+// being above it just means older, cheaper lots were left open by the LIFO
+// window and are now being sold.
 func crossCheck(c *cgt.Result, e *exittax.Result) []string {
-	var large []string
-	small, maxSmall := 0, decimal.Zero
+	var suspicious []string
+	differing, maxDiff := 0, decimal.Zero
 	tolerance := decimal.RequireFromString("0.05") // ignore diff <= €0.05 - mainly due to precision
 	check := func(ticker, day string, ours, theirs, proceeds decimal.Decimal) {
-		diff := ours.Sub(theirs).Abs()
-		if !diff.GreaterThan(tolerance) {
+		diff := ours.Sub(theirs)
+		if diff.Abs().LessThanOrEqual(tolerance) {
 			return
 		}
-		if proceeds.Sign() > 0 && diff.GreaterThan(proceeds.Mul(decimal.RequireFromString("0.25"))) {
-			large = append(large, fmt.Sprintf("%s %s: gain %s vs Trading 212 'Result' %s — LARGE difference, check that all earlier buys are in the exports",
+		differing++
+		if diff.Abs().GreaterThan(maxDiff) {
+			maxDiff = diff.Abs()
+		}
+		if diff.Sign() < 0 && proceeds.Sign() > 0 && diff.Abs().GreaterThan(proceeds.Mul(decimal.RequireFromString("0.25"))) {
+			suspicious = append(suspicious, fmt.Sprintf("%s %s: our gain %s is far below Trading 212's 'Result' %s. Usually FIFO vs average cost; if unexpected, check that all earlier buys are in the exports",
 				day, ticker, ours.StringFixed(2), theirs.StringFixed(2)))
-			return
-		}
-		small++
-		if diff.GreaterThan(maxSmall) {
-			maxSmall = diff
 		}
 	}
 	for _, d := range c.Disposals {
@@ -287,10 +288,10 @@ func crossCheck(c *cgt.Result, e *exittax.Result) []string {
 			check(d.Trade.Ticker, d.Trade.Day().Format("2006-01-02"), d.GainEUR, d.Trade.BrokerResult, d.ProceedsEUR)
 		}
 	}
-	out := large
-	if small > 0 {
-		out = append(out, fmt.Sprintf("%d disposal(s) differ from Trading 212's 'Result' column by up to €%s; expected, because Trading 212 uses average cost and this tool uses FIFO / 4-week LIFO as Irish law requires",
-			small, maxSmall.StringFixed(2)))
+	out := suspicious
+	if differing > 0 {
+		out = append(out, fmt.Sprintf("%d disposal(s) differ from Trading 212's 'Result' column by up to €%s. Expected: Trading 212 uses average cost without fees; this tool uses FIFO / 4-week LIFO with fees as Irish law requires",
+			differing, maxDiff.StringFixed(2)))
 	}
 	return out
 }

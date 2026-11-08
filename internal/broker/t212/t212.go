@@ -219,9 +219,13 @@ func Parse(r io.Reader, file string) (broker.Result, error) {
 			t.Price = model.Money{Amount: p, CCY: get(row, "Currency (Price / share)")}
 		}
 		t.BrokerFX, _ = dec(get(row, "Exchange rate"))
-		if v, err := dec(get(row, "Result")); err == nil {
-			t.BrokerResult = v
-			t.HasBrokerResult = true
+		// Result is only comparable to our EUR gain when it is in EUR; for
+		// trades settled from a USD balance Trading 212 states it in USD.
+		if cur := get(row, "Currency (Result)"); cur == "" || cur == "EUR" {
+			if v, err := dec(get(row, "Result")); err == nil {
+				t.BrokerResult = v
+				t.HasBrokerResult = true
+			}
 		}
 
 		res.Trades = append(res.Trades, t)
